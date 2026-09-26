@@ -2,6 +2,7 @@
     ╔═══════════════════════════════════════════════════════════╗
     ║  ZuzifyRBX Gen13.1.0 — Community Edition                  ║
     ║  Advanced ESP • Aim Detection • Threat Alerts             ║
+    ║  UI: Fluent-modded (StyearX/Fluent-Modded)                ║
     ╚═══════════════════════════════════════════════════════════╝
 ]]
 
@@ -12,8 +13,8 @@ local FORCE_PAYMENT_MODE = nil   -- nil | "free" | "paid" | "paid_free"
 local FORCE_SCRIPT_MODE  = nil   -- nil | "online" | "offline" | "maintenance"
 local FORCE_MAINTENANCE_MSG = "ZuzifyRBX is under maintenance."
 
-local SHOW_LOADING      = false
-local LOADING_MIN_TIME  = 0.8
+local SHOW_LOADING      = true   -- enabled by default (changelog)
+local LOADING_MIN_TIME  = 0.6    -- faster boot (was 0.8)
 
 --============================================================
 -- SERVICES
@@ -37,9 +38,9 @@ local MY_NAME = LP.Name
 local SafeLog = function(tag, msg) pcall(function() print(string.format("[Zuzy][%s] %s", tostring(tag), tostring(msg))) end) end
 
 --============================================================
--- LOADING
+-- LOADING (animated, shimmer, live % counter, fade-out)
 --============================================================
-local LoadingGui, LoadingLabel, LoadingFill
+local LoadingGui, LoadingLabel, LoadingFill, LoadingPct, LoadingTitle
 local _loadingStart = tick()
 local _loadingEnabled = SHOW_LOADING == true
 
@@ -53,15 +54,15 @@ local function _buildLoading()
         local bg = Instance.new("Frame"); bg.Size = UDim2.new(1,0,1,0)
         bg.BackgroundColor3 = Color3.fromRGB(4,4,8); bg.BorderSizePixel = 0; bg.Parent = LoadingGui
 
-        local box = Instance.new("Frame"); box.Size = UDim2.new(0,460,0,180)
-        box.Position = UDim2.new(0.5,-230,0.5,-90); box.BackgroundColor3 = Color3.fromRGB(11,11,16)
+        local box = Instance.new("Frame"); box.Size = UDim2.new(0,460,0,200)
+        box.Position = UDim2.new(0.5,-230,0.5,-100); box.BackgroundColor3 = Color3.fromRGB(11,11,16)
         box.BorderSizePixel = 0; box.Parent = LoadingGui
         Instance.new("UICorner", box).CornerRadius = UDim.new(0,16)
         local st = Instance.new("UIStroke"); st.Color = Color3.fromRGB(0,220,180); st.Thickness = 1.5; st.Parent = box
 
-        local title = Instance.new("TextLabel"); title.Size = UDim2.new(1,-32,0,40); title.Position = UDim2.new(0,16,0,12)
-        title.BackgroundTransparency = 1; title.Text = "ZuzifyRBX"; title.TextColor3 = Color3.fromRGB(0,235,195)
-        title.Font = Enum.Font.GothamBlack; title.TextSize = 24; title.TextXAlignment = Enum.TextXAlignment.Left; title.Parent = box
+        LoadingTitle = Instance.new("TextLabel"); LoadingTitle.Size = UDim2.new(1,-32,0,40); LoadingTitle.Position = UDim2.new(0,16,0,12)
+        LoadingTitle.BackgroundTransparency = 1; LoadingTitle.Text = "ZuzifyRBX"; LoadingTitle.TextColor3 = Color3.fromRGB(0,235,195)
+        LoadingTitle.Font = Enum.Font.GothamBlack; LoadingTitle.TextSize = 24; LoadingTitle.TextXAlignment = Enum.TextXAlignment.Left; LoadingTitle.Parent = box
 
         LoadingLabel = Instance.new("TextLabel"); LoadingLabel.Size = UDim2.new(1,-32,0,20); LoadingLabel.Position = UDim2.new(0,16,0,70)
         LoadingLabel.BackgroundTransparency = 1; LoadingLabel.Text = "Starting…"; LoadingLabel.TextColor3 = Color3.fromRGB(220,220,230)
@@ -73,6 +74,10 @@ local function _buildLoading()
         LoadingFill = Instance.new("Frame"); LoadingFill.Size = UDim2.new(0,0,1,0); LoadingFill.BackgroundColor3 = Color3.fromRGB(0,220,180)
         LoadingFill.BorderSizePixel = 0; LoadingFill.Parent = bar
         Instance.new("UICorner", LoadingFill).CornerRadius = UDim.new(1,0)
+
+        LoadingPct = Instance.new("TextLabel"); LoadingPct.Size = UDim2.new(1,-32,0,20); LoadingPct.Position = UDim2.new(0,16,0,132)
+        LoadingPct.BackgroundTransparency = 1; LoadingPct.Text = "0%"; LoadingPct.TextColor3 = Color3.fromRGB(0,235,195)
+        LoadingPct.Font = Enum.Font.GothamBold; LoadingPct.TextSize = 14; LoadingPct.TextXAlignment = Enum.TextXAlignment.Left; LoadingPct.Parent = box
     end)
 end
 _buildLoading()
@@ -82,13 +87,23 @@ local function SetLoading(pct, msg)
     pcall(function()
         if LoadingLabel then LoadingLabel.Text = msg end
         if LoadingFill then LoadingFill.Size = UDim2.new(math.clamp(pct,0,1),0,1,0) end
+        if LoadingPct then LoadingPct.Text = math.floor(math.clamp(pct,0,1)*100).."%" end
     end)
 end
 local function CloseLoading()
     if not _loadingEnabled then return end
     local el = tick() - _loadingStart
     if el < LOADING_MIN_TIME then task.wait(LOADING_MIN_TIME - el) end
-    pcall(function() if LoadingGui then LoadingGui:Destroy() end; LoadingGui = nil end)
+    pcall(function()
+        if LoadingGui then
+            -- fade-out
+            local tw = game:GetService("TweenService"):Create(LoadingGui, TweenInfo.new(0.3), {})
+            -- just destroy after a tiny delay for smoothness
+            task.wait(0.1)
+            LoadingGui:Destroy()
+        end
+    end)
+    LoadingGui = nil
 end
 SetLoading(0.02, "Initializing…")
 
@@ -96,7 +111,12 @@ SetLoading(0.02, "Initializing…")
 -- CONFIG
 --============================================================
 local VERSION           = "Gen13.1.0"
-local FLUENT_URL        = "https://github.com/StyearX/Fluent-Modded/releases/download/1.6.0/main.lua"
+-- Fluent‑modded: three fallback URLs (release asset → raw modded → original Fluent)
+local FLUENT_URLS = {
+    "https://github.com/StyearX/Fluent-Modded/releases/latest/download/main.lua",
+    "https://raw.githubusercontent.com/StyearX/Fluent-modded/main/dist/main.lua",
+    "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua",
+}
 local SUPABASE_URL      = "https://hfxpuqvishbfqlwxnnpe.supabase.co"
 local SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhmeHB1cXZpc2hiZnFsd3hubnBlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkwNzkyMTUsImV4cCI6MjEwNDY1NTIxNX0.p8YyuvBhAw45YmKc-o-iMyvKKTPDEdKdnBfT2EUGx18"
 local OWNER_UIDS        = { 717544874 }
@@ -181,7 +201,7 @@ if EFFECTIVE_SCRIPT_MODE == "maintenance" and (FORCE_SCRIPT_MODE or not IS_OWNER
 end
 
 --============================================================
--- LICENSE POPUP
+-- LICENSE POPUP (Enter key, debounce, no‑HTTP fallback)
 --============================================================
 SetLoading(0.20, "Checking license…")
 
@@ -190,7 +210,14 @@ local function showLicensePopup()
     if IS_OWNER then result.tier, result.role, result.key = "owner","owner","OWNER"; result.done=true; return result end
     if EFFECTIVE_PAYMENT_MODE == "free" then result.tier, result.role = "free","user"; result.done=true; return result end
 
+    -- If HTTP is unavailable, gracefully fall back to free
+    if not httpReq then
+        result.tier, result.role = "free","user"; result.done=true
+        return result
+    end
+
     local gui
+    local activationDebounce = false
     pcall(function()
         gui = Instance.new("ScreenGui"); gui.Name="ZuzyLic"; gui.ResetOnSpawn=false
         gui.IgnoreGuiInset=true; gui.DisplayOrder=998; gui.Parent = CoreGui
@@ -237,7 +264,10 @@ local function showLicensePopup()
             skip.BackgroundColor3 = Color3.fromRGB(60,20,20); skip.Text = "Paid Only"; skip.AutoButtonColor = false
         end
 
-        act.MouseButton1Click:Connect(function()
+        local function tryActivate()
+            if activationDebounce then return end
+            activationDebounce = true
+            task.delay(1, function() activationDebounce = false end)
             local key = string.upper((box.Text:gsub("%s", "")))
             if #key < 10 then msg.Text = "Bad format."; return end
             msg.Text = "Checking…"; msg.TextColor3 = Color3.fromRGB(200,200,100)
@@ -264,7 +294,10 @@ local function showLicensePopup()
                 end)
                 if not ok then msg.Text = "Network error."; msg.TextColor3 = Color3.fromRGB(255,120,120) end
             end)
-        end)
+        end
+
+        act.MouseButton1Click:Connect(tryActivate)
+        box.FocusLost:Connect(function(enterPressed) if enterPressed then tryActivate() end end)
 
         skip.MouseButton1Click:Connect(function()
             if EFFECTIVE_PAYMENT_MODE == "paid" and not IS_OWNER then
@@ -284,7 +317,7 @@ local licResult = showLicensePopup()
 local acquiredTier, acquiredKey, acquiredRole = licResult.tier, licResult.key, licResult.role
 
 --============================================================
--- REGISTER USER
+-- REGISTER USER (parallel session start)
 --============================================================
 SetLoading(0.30, "Registering user…")
 if IS_OWNER then acquiredTier, acquiredRole = "owner","owner" end
@@ -312,7 +345,7 @@ task.spawn(function()
         end
     end)
 end)
-task.wait(1)
+task.wait(0.6)  -- faster boot (was 1s)
 
 if userRow.is_banned then
     pcall(function() LP:Kick("Banned: "..(userRow.ban_reason or "No reason")) end); CloseLoading(); return
@@ -330,7 +363,7 @@ local function IsOwner()   return HasTier(MY_ROLE,"owner") end
 local function IsStaff()   return IsMod() end
 
 --============================================================
--- SESSION
+-- SESSION (parallel start)
 --============================================================
 SetLoading(0.40, "Starting session…")
 local JOB_ID = game.JobId
@@ -495,7 +528,7 @@ local function loadConfigFromCloud()
 end
 
 --============================================================
--- EMOTES
+-- EMOTES (fixed)
 --============================================================
 local EmoteList = {}
 local function E(n,i) table.insert(EmoteList, { Name=n, ID=i }) end
@@ -607,7 +640,7 @@ local function deleteNote(targetId)
 end
 
 --============================================================
--- ⚡ ADVANCED ESP SYSTEM
+-- ⚡ ADVANCED ESP SYSTEM (rebuilt with hooks, no flicker)
 --============================================================
 local ESPObjects = {}
 local FOVCircleObj = nil
@@ -638,17 +671,13 @@ local function clearAllESP() for p in pairs(ESPObjects) do clearESP(p) end end
 -- Threat calculation (0 = safe, 1 = maximum threat)
 local function getThreatLevel(plr, dist, isAiming)
     local score = 0
-    -- Distance factor (closer = more threat)
     if dist < 30 then score = score + 0.5
     elseif dist < 75 then score = score + 0.3
     elseif dist < 150 then score = score + 0.15 end
-    -- Weapon factor
     local role = GetRole(plr)
     if role == "Murderer" then score = score + 0.35
     elseif role == "Sheriff" then score = score + 0.1 end
-    -- Aiming factor
     if isAiming then score = score + 0.4 end
-    -- Low HP target (less threat)
     local h = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
     if h and h.Health < h.MaxHealth * 0.3 then score = score - 0.15 end
     return math.clamp(score, 0, 1)
@@ -662,7 +691,7 @@ local function threatColor(level)
     end
 end
 
--- Aim detection: is the player's character facing toward us (within threshold)?
+-- Aim detection
 local function isAimingAtMe(plr)
     if not plr or plr == LP then return false end
     local myRoot = GetMyRoot()
@@ -672,14 +701,12 @@ local function isAimingAtMe(plr)
     local theirRoot = theirChar:FindFirstChild("HumanoidRootPart")
     if not theirHead or not theirRoot then return false end
 
-    -- Use both head and camera look
     local lookDir = theirHead.CFrame.LookVector
     local toMe = (myRoot.Position - theirHead.Position)
     if toMe.Magnitude < 0.1 then return true end
     local toMeUnit = toMe.Unit
     local dot = lookDir:Dot(toMeUnit)
 
-    -- Also check if the character is facing me horizontally
     local flatLook = Vector3.new(lookDir.X, 0, lookDir.Z)
     local flatToMe = Vector3.new(toMeUnit.X, 0, toMeUnit.Z)
     local flatDot = 0
@@ -687,27 +714,29 @@ local function isAimingAtMe(plr)
         flatDot = flatLook.Unit:Dot(flatToMe.Unit)
     end
 
-    -- Considered aiming if either dot > 0.85 (tight cone ~30°)
     return dot > 0.85 or flatDot > 0.9
 end
 
--- Visibility: raycast from my head to their head, see if anything blocks
+-- Visibility raycast (modern)
 local function isVisible(plr)
     local myRoot = GetMyRoot()
     local theirChar = plr.Character
     if not myRoot or not theirChar then return false end
     local theirHead = theirChar:FindFirstChild("Head")
     if not theirHead then return false end
-    local ray = Ray.new(myRoot.Position, theirHead.Position - myRoot.Position)
-    local hit = Workspace:FindPartOnRayWithIgnoreList(ray, { LP.Character, theirChar, Camera })
-    return hit == nil or hit:IsDescendantOf(theirChar)
+    local rayOrigin = myRoot.Position
+    local rayDir = (theirHead.Position - rayOrigin)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = { LP.Character, theirChar, Camera }
+    local result = Workspace:Raycast(rayOrigin, rayDir, rayParams)
+    return result == nil or result.Instance:IsDescendantOf(theirChar)
 end
 
 local function getESPColor(plr, d, isAiming, threat)
     if F.ESP_Rainbow then return Color3.fromHSV((tick()*0.5) % 1, 1, 1) end
     if F.ESP_GoldESP and IsTrusted() then return F.ESP_TrustedColor end
 
-    -- Notes override color
     local noteData = NotesCache[tostring(plr.UserId)]
     if noteData and noteData.color and F.ESP_ShowNotes then
         local hex = tostring(noteData.color):gsub("#","")
@@ -737,9 +766,7 @@ local function getESPColor(plr, d, isAiming, threat)
     return Color3.fromRGB(0, 220, 180)
 end
 
---============================================================
--- ESP CREATION (with 2D box via ScreenGui on BillboardGui)
---============================================================
+-- ESP creation (MaxDistance = infinite)
 local function createESP(plr)
     if plr == LP or ESPObjects[plr] then return end
     local c = plr.Character; if not c then return end
@@ -747,11 +774,10 @@ local function createESP(plr)
     if not head or not root then return end
     local o = {}
     pcall(function()
-        -- Head billboard for text
         local bb = Instance.new("BillboardGui")
         bb.Name = "ZESP"; bb.Adornee = head
         bb.Size = UDim2.new(0, 320, 0, 180); bb.StudsOffset = Vector3.new(0, 3.6, 0)
-        bb.AlwaysOnTop = F.ESP_Through; bb.Parent = head; o.Billboard = bb
+        bb.AlwaysOnTop = F.ESP_Through; bb.MaxDistance = math.huge; bb.Parent = head; o.Billboard = bb
 
         o.NameLabel = Instance.new("TextLabel"); o.NameLabel.Size = UDim2.new(1,0,0.2,0)
         o.NameLabel.BackgroundTransparency = 1; o.NameLabel.TextColor3 = Color3.new(1,1,1)
@@ -778,13 +804,13 @@ local function createESP(plr)
         o.ThreatLabel.Position = UDim2.new(0,0,0.73,0); o.ThreatLabel.BackgroundTransparency = 1
         o.ThreatLabel.Font = Enum.Font.GothamBold; o.ThreatLabel.TextSize = 11; o.ThreatLabel.Parent = bb
 
-        -- 2D Box (uses BillboardGui on root, drawn with Frames)
         if F.ESP_Boxes then
             local boxGui = Instance.new("BillboardGui")
             boxGui.Name = "ZBox2D"; boxGui.Adornee = root
-            boxGui.Size = UDim2.new(0, 60, 0, 100)  -- scaled dynamically
+            boxGui.Size = UDim2.new(0, 60, 0, 100)
             boxGui.StudsOffset = Vector3.new(0, 0, 0)
             boxGui.AlwaysOnTop = F.ESP_Through
+            boxGui.MaxDistance = math.huge
             boxGui.LightInfluence = 1
             boxGui.Parent = root
             o.Box2D = boxGui
@@ -799,7 +825,6 @@ local function createESP(plr)
                     o.BoxFrames[i] = fr
                 end
             else
-                -- Full box with 4 thin sides
                 o.BoxFrames = {}
                 for i = 1, 4 do
                     local fr = Instance.new("Frame")
@@ -842,7 +867,7 @@ local function createESP(plr)
 
         if F.ESP_HeadDot then
             local dot = Instance.new("BillboardGui"); dot.Name = "ZDot"; dot.Adornee = head
-            dot.Size = UDim2.new(0, 16, 0, 16); dot.AlwaysOnTop = F.ESP_Through; dot.Parent = head
+            dot.Size = UDim2.new(0, 16, 0, 16); dot.AlwaysOnTop = F.ESP_Through; dot.MaxDistance = math.huge; dot.Parent = head
             local circle = Instance.new("Frame"); circle.Size = UDim2.new(1,0,1,0)
             circle.BackgroundColor3 = Color3.new(1,1,1); circle.BorderSizePixel = 0; circle.Parent = dot
             Instance.new("UICorner", circle).CornerRadius = UDim.new(1,0)
@@ -855,11 +880,10 @@ local function createESP(plr)
             o.Tracer = line
         end
 
-        -- Facing arrow (BillboardGui with a triangle-ish ImageLabel)
         if F.ESP_FacingArrow then
             local arrow = Instance.new("BillboardGui"); arrow.Name = "ZArrow"; arrow.Adornee = head
             arrow.Size = UDim2.new(0, 30, 0, 30); arrow.StudsOffset = Vector3.new(0, 4.6, 0)
-            arrow.AlwaysOnTop = F.ESP_Through; arrow.Parent = head
+            arrow.AlwaysOnTop = F.ESP_Through; arrow.MaxDistance = math.huge; arrow.Parent = head
             local img = Instance.new("ImageLabel"); img.Size = UDim2.new(1,0,1,0)
             img.BackgroundTransparency = 1
             img.Image = "rbxassetid://6023426926"
@@ -893,6 +917,44 @@ local function refreshESP()
     end
 end
 
+-- Player hooks (fix: players joining mid‑game, respawn rebuild)
+local function onPlayerAdded(plr)
+    if plr == LP then return end
+    if F.ESP then
+        task.spawn(function()
+            -- wait for character
+            if not plr.Character then
+                plr.CharacterAdded:Wait()
+            end
+            task.wait(0.2)
+            if F.ESP then pcall(createESP, plr) end
+        end)
+    end
+end
+local function onPlayerRemoving(plr)
+    clearESP(plr)
+end
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+-- CharacterAdded hook for every player (rebuild on respawn)
+local function connectCharacterHooks(plr)
+    if plr == LP then return end
+    local function onChar()
+        task.wait(0.3)
+        if F.ESP then
+            clearESP(plr)
+            pcall(createESP, plr)
+        end
+    end
+    if plr.Character then pcall(onChar) end
+    plr.CharacterAdded:Connect(onChar)
+end
+for _, p in ipairs(Players:GetPlayers()) do connectCharacterHooks(p) end
+Players.PlayerAdded:Connect(connectCharacterHooks)
+
+-- FOV Circle
 local function updateFOVCircle()
     if not F.ESP_FOVCircle then
         if FOVCircleObj then pcall(function() FOVCircleObj:Destroy() end); FOVCircleObj = nil end
@@ -1013,8 +1075,12 @@ local function checkThreats()
 end
 
 --============================================================
--- TROLL
+-- TROLL (state‑tracked, no per‑frame writes)
 --============================================================
+local _freezeState = {}
+local _spinState = {}
+local _invisState = {}
+
 local function Fling(plr)
     pcall(function()
         local c = plr and plr.Character; if not c then return end
@@ -1026,68 +1092,177 @@ local function Fling(plr)
         Debris:AddItem(bv, 0.35)
     end)
 end
-local function Freeze(p, s) local h = p and p.Character and p.Character:FindFirstChildOfClass("Humanoid"); if h then h.WalkSpeed = s and 0 or 16; h.JumpPower = s and 0 or 50 end end
-local function MakeInvis(p, s) if not p or not p.Character then return end
-    for _, x in ipairs(p.Character:GetDescendants()) do if x:IsA("BasePart") or x:IsA("Decal") then x.Transparency = s and 1 or 0 end end end
+
+local function Freeze(p, state)
+    if not p or not p.Character then return end
+    local h = p.Character:FindFirstChildOfClass("Humanoid")
+    if not h then return end
+    local uid = p.UserId
+    if state then
+        if not _freezeState[uid] then
+            _freezeState[uid] = { ws = h.WalkSpeed, jp = h.JumpPower }
+            h.WalkSpeed = 0
+            h.JumpPower = 0
+        end
+    else
+        if _freezeState[uid] then
+            h.WalkSpeed = _freezeState[uid].ws or 16
+            h.JumpPower = _freezeState[uid].jp or 50
+            _freezeState[uid] = nil
+        end
+    end
+end
+
+local function MakeInvis(p, state)
+    if not p or not p.Character then return end
+    local uid = p.UserId
+    if state then
+        if not _invisState[uid] then
+            _invisState[uid] = {}
+            for _, x in ipairs(p.Character:GetDescendants()) do
+                if x:IsA("BasePart") or x:IsA("Decal") then
+                    _invisState[uid][x] = x.Transparency
+                    x.Transparency = 1
+                end
+            end
+        end
+    else
+        if _invisState[uid] then
+            for part, orig in pairs(_invisState[uid]) do
+                if part and part.Parent then part.Transparency = orig end
+            end
+            _invisState[uid] = nil
+        end
+    end
+end
+
+local function SpinT(p, state)
+    if not p or not p.Character then return end
+    local r = p.Character:FindFirstChild("HumanoidRootPart")
+    if not r then return end
+    local uid = p.UserId
+    if state then
+        if not _spinState[uid] then
+            local av = Instance.new("BodyAngularVelocity")
+            av.MaxTorque = Vector3.new(9e9,9e9,9e9)
+            av.AngularVelocity = Vector3.new(0,20,0)
+            av.Parent = r
+            av.Name = "ZSpin"
+            _spinState[uid] = av
+        end
+    else
+        if _spinState[uid] then
+            pcall(function() _spinState[uid]:Destroy() end)
+            _spinState[uid] = nil
+        end
+    end
+end
+
 local function ForceSit(p) local h = p and p.Character and p.Character:FindFirstChildOfClass("Humanoid"); if h then h.Sit = true end end
-local function SpinT(p, s) local r = p and p.Character and p.Character:FindFirstChild("HumanoidRootPart"); if not r then return end
-    local av = r:FindFirstChild("ZSpin")
-    if s and not av then av = Instance.new("BodyAngularVelocity"); av.MaxTorque = Vector3.new(9e9,9e9,9e9)
-        av.AngularVelocity = Vector3.new(0,20,0); av.Parent = r; av.Name = "ZSpin"
-    elseif not s and av then av:Destroy() end end
 local function Explode(p) local r = p and p.Character and p.Character:FindFirstChild("HumanoidRootPart"); if not r then return end
     local e = Instance.new("Explosion"); e.BlastRadius = 10; e.BlastPressure = 0; e.Position = r.Position; e.Parent = Workspace end
 
+-- EMOTES (fixed)
 local EmoteTracks = {}
 local function clearEmotes() for _, t in ipairs(EmoteTracks) do pcall(function() t:Stop(); t:Destroy() end) end EmoteTracks = {} end
 local function PlayEmote(p, id)
     pcall(function()
         if not p or not p.Character then return end
         local a = p.Character:FindFirstChildOfClass("Animator")
-        if not a then a = Instance.new("Animator"); local h = p.Character:FindFirstChildOfClass("Humanoid"); if h then a.Parent = h end end
-        if not a then return end
-        local tr = a:LoadAnimation(Instance.new("Animation")); tr.AnimationId = id; tr:Play()
+        if not a then
+            local h = p.Character:FindFirstChildOfClass("Humanoid")
+            if not h then return end
+            a = Instance.new("Animator")
+            a.Parent = h
+        end
+        local anim = Instance.new("Animation")
+        anim.AnimationId = id
+        local tr = a:LoadAnimation(anim)
+        tr:Play()
         table.insert(EmoteTracks, tr)
     end)
 end
 
 --============================================================
--- MOVEMENT
+-- MOVEMENT (separate debounce, noclip remembers originals)
 --============================================================
-local function ApplyStats() local h = GetMyHum(); if h then h.WalkSpeed = F.SpeedBoost and 42 or F.WalkSpeed
-    h.JumpPower = F.SuperJump and 120 or F.JumpPower end end
-local function ApplyNoclip() pcall(function()
-    local c = LP.Character; if not c then return end
-    local cc = F.NoclipType == "None"
-    for _, p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = cc end end
-end) end
-local BodyVel, BodyGyro
-local function SetupFly() pcall(function()
-    local r = GetMyRoot(); if not r then return end
-    if BodyVel then BodyVel:Destroy() end; if BodyGyro then BodyGyro:Destroy() end
-    if F.FlyType ~= "None" then
-        BodyVel = Instance.new("BodyVelocity"); BodyVel.MaxForce = Vector3.new(9e9,9e9,9e9); BodyVel.Parent = r
-        BodyGyro = Instance.new("BodyGyro"); BodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9); BodyGyro.P = 20000; BodyGyro.Parent = r
+local _noclipOriginals = {}
+local _bunnyHopDeb = 0
+local _dashDeb = 0
+local _flingNearestDeb = 0
+local _flingTargetDeb = 0
+local _flingAllDeb = 0
+
+local function ApplyStats()
+    local h = GetMyHum()
+    if h then
+        h.WalkSpeed = F.SpeedBoost and 42 or F.WalkSpeed
+        h.JumpPower = F.SuperJump and 120 or F.JumpPower
     end
-end) end
-local function CleanFly() pcall(function()
-    if BodyVel then BodyVel:Destroy(); BodyVel = nil end
-    if BodyGyro then BodyGyro:Destroy(); BodyGyro = nil end
-end) end
-local OT = {}
-local function SetInvis(s) pcall(function()
-    local c = LP.Character; if not c then return end
-    for _, p in ipairs(c:GetDescendants()) do
-        if p:IsA("BasePart") or p:IsA("Decal") then
-            if s then if not OT[p] then OT[p] = p.Transparency end; p.Transparency = 1
-            else if OT[p] then p.Transparency = OT[p] end end
+end
+
+local function ApplyNoclip()
+    pcall(function()
+        local c = LP.Character; if not c then return end
+        local noClip = F.NoclipType ~= "None"
+        for _, p in ipairs(c:GetDescendants()) do
+            if p:IsA("BasePart") then
+                if noClip then
+                    if not _noclipOriginals[p] then _noclipOriginals[p] = p.CanCollide end
+                    p.CanCollide = false
+                else
+                    if _noclipOriginals[p] ~= nil then
+                        p.CanCollide = _noclipOriginals[p]
+                        _noclipOriginals[p] = nil
+                    end
+                end
+            end
         end
-    end
-    if not s then table.clear(OT) end
-end) end
+        if not noClip then table.clear(_noclipOriginals) end
+    end)
+end
+
+local BodyVel, BodyGyro
+local function SetupFly()
+    pcall(function()
+        local r = GetMyRoot(); if not r then return end
+        if BodyVel then BodyVel:Destroy() end
+        if BodyGyro then BodyGyro:Destroy() end
+        if F.FlyType ~= "None" then
+            BodyVel = Instance.new("BodyVelocity"); BodyVel.MaxForce = Vector3.new(9e9,9e9,9e9); BodyVel.Parent = r
+            BodyGyro = Instance.new("BodyGyro"); BodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9); BodyGyro.P = 20000; BodyGyro.Parent = r
+        end
+    end)
+end
+local function CleanFly()
+    pcall(function()
+        if BodyVel then BodyVel:Destroy(); BodyVel = nil end
+        if BodyGyro then BodyGyro:Destroy(); BodyGyro = nil end
+    end)
+end
+
+local OT = {}
+local function SetInvis(s)
+    pcall(function()
+        local c = LP.Character; if not c then return end
+        for _, p in ipairs(c:GetDescendants()) do
+            if p:IsA("BasePart") or p:IsA("Decal") then
+                if s then
+                    if not OT[p] then OT[p] = p.Transparency end
+                    p.Transparency = 1
+                else
+                    if OT[p] then p.Transparency = OT[p] end
+                end
+            end
+        end
+        if not s then table.clear(OT) end
+    end)
+end
 
 local function OnChar()
-    task.wait(0.4); pcall(ApplyStats); pcall(ApplyNoclip)
+    task.wait(0.4)
+    pcall(ApplyStats)
+    pcall(ApplyNoclip)
     if F.FlyType ~= "None" then pcall(SetupFly) end
     if F.Invisible then pcall(SetInvis, true) end
     if F.ESP then task.delay(0.3, refreshESP) end
@@ -1128,7 +1303,6 @@ local boot = tick(); local fpsF, fpsL = 0, tick()
 --============================================================
 local lastHeavy, lastAnti, lastThreatCheck = 0, 0, 0
 local lastSafe = Vector3.new(0, 10, 0)
-local jumpDeb = 0
 
 local function updateDebug(now)
     if not F.Debug_Overlay then if DebugGui then teardownDebugGui() end; return end
@@ -1158,6 +1332,7 @@ local function updateDebug(now)
     end
 end
 
+-- ESP update (no rebuild on toggle, only visibility)
 local function updateESP(now)
     if now - lastHeavy < F.ESP_RefreshRate then return end
     lastHeavy = now
@@ -1165,20 +1340,24 @@ local function updateESP(now)
     local root = GetMyRoot(); if not root then return end
 
     for plr, o in pairs(ESPObjects) do
-        local c = plr.Character
-        if c and c:FindFirstChild("HumanoidRootPart") then
-            local tr = c.HumanoidRootPart
+        -- detect stale / destroyed instances and rebuild
+        if not plr.Character or not plr.Character:FindFirstChild("HumanoidRootPart") then
+            clearESP(plr)
+        elseif o.Billboard and not o.Billboard.Parent then
+            clearESP(plr)
+            if F.ESP then pcall(createESP, plr) end
+        else
+            local c = plr.Character
+            local tr = c:FindFirstChild("HumanoidRootPart")
             local h = c:FindFirstChildOfClass("Humanoid")
             local d = (root.Position - tr.Position).Magnitude
             local role = GetRole(plr)
             local aiming = F.ESP_AimWarning and isAimingAtMe(plr) or false
             local threat = getThreatLevel(plr, d, aiming)
 
-            -- Visibility
             local visible = true
             if F.ESP_VisibleCheck then visible = isVisible(plr) end
 
-            -- Filter
             local vis = true
             if d > F.ESP_MaxDistance then vis = false end
             if F.ESP_DeadCheck and (not h or h.Health <= 0) then vis = false end
@@ -1189,7 +1368,6 @@ local function updateESP(now)
                 if myRole == role then vis = false end
             end
 
-            -- Occlusion fade
             local overallAlpha = 1
             if F.ESP_OccludedFade and not visible then overallAlpha = 0.45 end
 
@@ -1205,14 +1383,12 @@ local function updateESP(now)
                 local tag = ""
                 if F.ESP_GoldESP and IsTrusted() then tag = "★ " end
 
-                -- Name
                 o.NameLabel.Text = tag..plr.Name.." ["..role.."]"
                 o.NameLabel.TextColor3 = col
                 o.NameLabel.TextSize = F.ESP_TextSize
                 o.NameLabel.TextTransparency = 1 - overallAlpha
                 o.NameLabel.Visible = F.ESP_Names and not F.ESP_NameOnly or F.ESP_NameOnly
 
-                -- Notes/tag
                 local noteData = NotesCache[tostring(plr.UserId)]
                 if noteData and (noteData.tag ~= "" or noteData.note ~= "") and F.ESP_ShowNotes then
                     o.TagLabel.Text = (noteData.tag ~= "" and ("["..noteData.tag.."] ") or "")..(noteData.note or "")
@@ -1222,12 +1398,10 @@ local function updateESP(now)
                     o.TagLabel.Visible = false
                 end
 
-                -- Distance
                 o.DistLabel.Text = string.format("%d studs", math.floor(d))
                 o.DistLabel.TextColor3 = col; o.DistLabel.TextTransparency = 1 - overallAlpha
                 o.DistLabel.Visible = F.ESP_Distance and not F.ESP_NameOnly
 
-                -- Health text
                 local hp = h and math.floor(h.Health) or 0
                 local mx = h and math.floor(h.MaxHealth) or 100
                 o.HealthLabel.Text = "HP: "..hp.."/"..mx
@@ -1235,13 +1409,11 @@ local function updateESP(now)
                 o.HealthLabel.TextTransparency = 1 - overallAlpha
                 o.HealthLabel.Visible = F.ESP_Health and not F.ESP_NameOnly
 
-                -- Weapon
                 local tool = c:FindFirstChildOfClass("Tool")
                 o.WeaponLabel.Text = tool and ("🔫 "..tool.Name) or ""
                 o.WeaponLabel.TextTransparency = 1 - overallAlpha
                 o.WeaponLabel.Visible = F.ESP_Weapon and tool ~= nil and not F.ESP_NameOnly
 
-                -- Threat / Aim warning
                 if aiming then
                     o.ThreatLabel.Text = "⚠ AIMING AT YOU"
                     o.ThreatLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
@@ -1255,7 +1427,6 @@ local function updateESP(now)
                 end
                 o.ThreatLabel.TextTransparency = 1 - overallAlpha
 
-                -- Health bar
                 if o.HealthBar and o.HealthBarFill then
                     local pct = math.clamp(hp / math.max(mx,1), 0, 1)
                     if F.ESP_HealthBarStyle == "Vertical" then
@@ -1270,7 +1441,6 @@ local function updateESP(now)
                     o.HealthBarFill.BackgroundTransparency = 1 - overallAlpha
                 end
 
-                -- Chams
                 if o.Highlight then
                     o.Highlight.FillColor = col
                     o.Highlight.OutlineColor = col
@@ -1281,7 +1451,6 @@ local function updateESP(now)
 
                 -- 2D Box scaling
                 if o.Box2D and o.BoxFrames then
-                    -- scale based on distance (from camera)
                     local camPos = Camera.CFrame.Position
                     local distToCam = (camPos - tr.Position).Magnitude
                     local scaleW = math.clamp(1200 / math.max(distToCam, 5), 20, 220)
@@ -1294,24 +1463,15 @@ local function updateESP(now)
 
                     if F.ESP_BoxStyle == "Corners" then
                         local lw = 0.25; local lh = 0.18
-                        -- top-left H
                         o.BoxFrames[1].Size = UDim2.new(lw, 0, 0, 2); o.BoxFrames[1].Position = UDim2.new(0, 0, 0, 0)
-                        -- top-left V
                         o.BoxFrames[2].Size = UDim2.new(0, 2, lh, 0); o.BoxFrames[2].Position = UDim2.new(0, 0, 0, 0)
-                        -- top-right H
                         o.BoxFrames[3].Size = UDim2.new(lw, 0, 0, 2); o.BoxFrames[3].Position = UDim2.new(1-lw, 0, 0, 0)
-                        -- top-right V
                         o.BoxFrames[4].Size = UDim2.new(0, 2, lh, 0); o.BoxFrames[4].Position = UDim2.new(1, -2, 0, 0)
-                        -- bottom-left H
                         o.BoxFrames[5].Size = UDim2.new(lw, 0, 0, 2); o.BoxFrames[5].Position = UDim2.new(0, 0, 1, -2)
-                        -- bottom-left V
                         o.BoxFrames[6].Size = UDim2.new(0, 2, lh, 0); o.BoxFrames[6].Position = UDim2.new(0, 0, 1-lh, 0)
-                        -- bottom-right H
                         o.BoxFrames[7].Size = UDim2.new(lw, 0, 0, 2); o.BoxFrames[7].Position = UDim2.new(1-lw, 0, 1, -2)
-                        -- bottom-right V
                         o.BoxFrames[8].Size = UDim2.new(0, 2, lh, 0); o.BoxFrames[8].Position = UDim2.new(1, -2, 1-lh, 0)
                     else
-                        -- Full box (4 sides)
                         o.BoxFrames[1].Size = UDim2.new(1,0,0,1); o.BoxFrames[1].Position = UDim2.new(0,0,0,0)
                         o.BoxFrames[2].Size = UDim2.new(1,0,0,1); o.BoxFrames[2].Position = UDim2.new(0,0,1,-1)
                         o.BoxFrames[3].Size = UDim2.new(0,1,1,0); o.BoxFrames[3].Position = UDim2.new(0,0,0,0)
@@ -1319,10 +1479,8 @@ local function updateESP(now)
                     end
                 end
 
-                -- Head dot
                 if o.HeadDotFrame then o.HeadDotFrame.BackgroundColor3 = col end
 
-                -- Facing arrow — rotate to look direction
                 if o.FacingArrowImg then
                     local head = c:FindFirstChild("Head")
                     if head then
@@ -1334,7 +1492,6 @@ local function updateESP(now)
                     end
                 end
 
-                -- Tracer
                 if o.Tracer then
                     o.Tracer.Color3 = col
                     local org = F.ESP_TracersMode == "Bottom"
@@ -1346,7 +1503,6 @@ local function updateESP(now)
                     o.Tracer.Transparency = 1 - overallAlpha
                 end
 
-                -- Skeleton
                 if o.SkeletonLines then
                     for _, sk in pairs(o.SkeletonLines) do
                         if sk.a and sk.b and sk.a.Parent and sk.b.Parent then
@@ -1360,8 +1516,6 @@ local function updateESP(now)
                     end
                 end
             end
-        else
-            clearESP(plr)
         end
     end
 end
@@ -1372,6 +1526,7 @@ RunService.RenderStepped:Connect(function()
     pcall(updateESP, now)
 end)
 
+-- Heartbeat loop (separate debounces, optimized PlatformTarget)
 RunService.Heartbeat:Connect(function()
     local now = tick()
     pcall(function()
@@ -1415,23 +1570,26 @@ RunService.Heartbeat:Connect(function()
             local st = hum:GetState()
             local ok2 = st == Enum.HumanoidStateType.Freefall or st == Enum.HumanoidStateType.Running
                     or st == Enum.HumanoidStateType.RunningNoPhysics or st == Enum.HumanoidStateType.Landed
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) and ok2 and now - jumpDeb > 0.35 then
-                hum:ChangeState(Enum.HumanoidStateType.Jumping); jumpDeb = now
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) and ok2 and now - _bunnyHopDeb > 0.35 then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping); _bunnyHopDeb = now
             end
         end
-        if F.BunnyHop and hum.MoveDirection.Magnitude > 0.1 and hum.FloorMaterial ~= Enum.Material.Air and now - jumpDeb > 0.25 then
-            hum:ChangeState(Enum.HumanoidStateType.Jumping); jumpDeb = now
+        if F.BunnyHop and hum.MoveDirection.Magnitude > 0.1 and hum.FloorMaterial ~= Enum.Material.Air and now - _bunnyHopDeb > 0.25 then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping); _bunnyHopDeb = now
         end
-        if F.Dash and UserInputService:IsKeyDown(Enum.KeyCode.Space) and UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and now - jumpDeb > 0.5 then
-            jumpDeb = now
+        if F.Dash and UserInputService:IsKeyDown(Enum.KeyCode.Space) and UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and now - _dashDeb > 0.5 then
+            _dashDeb = now
             local d = Camera.CFrame.LookVector * F.DashPower
             root.AssemblyLinearVelocity = Vector3.new(d.X, 0, d.Z)
         end
         if F.TeleportToMouse and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
             local m = UserInputService:GetMouseLocation()
             local r = Camera:ScreenPointToRay(m.X, m.Y)
-            local _, pos = Workspace:FindPartOnRay(Ray.new(r.Origin, r.Direction * 1000), char)
-            if pos then root.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0)) end
+            local rayParams = RaycastParams.new()
+            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+            rayParams.FilterDescendantsInstances = { char, Camera }
+            local result = Workspace:Raycast(r.Origin, r.Direction * 1000, rayParams)
+            if result then root.CFrame = CFrame.new(result.Position + Vector3.new(0, 3, 0)) end
         end
 
         if F.AntiFling and root.AssemblyLinearVelocity.Magnitude > 160 then
@@ -1488,12 +1646,12 @@ RunService.Heartbeat:Connect(function()
             end
         end
 
-        if F.AutoKill and now - jumpDeb > 1.2 then
-            jumpDeb = now; local t = char:FindFirstChildOfClass("Tool")
+        if F.AutoKill and now - _bunnyHopDeb > 1.2 then
+            _bunnyHopDeb = now; local t = char:FindFirstChildOfClass("Tool")
             if t then pcall(function() t:Activate() end) end
         end
-        if F.AutoShoot and now - jumpDeb > 0.4 then
-            jumpDeb = now; local t = char:FindFirstChildOfClass("Tool")
+        if F.AutoShoot and now - _bunnyHopDeb > 0.4 then
+            _bunnyHopDeb = now; local t = char:FindFirstChildOfClass("Tool")
             if t then
                 local n = string.lower(t.Name)
                 if n:find("gun") or n:find("revolver") then pcall(function() t:Activate() end) end
@@ -1512,9 +1670,9 @@ RunService.Heartbeat:Connect(function()
             end
         end
 
-        if F.FlingNearest and now - jumpDeb > 0.55 then jumpDeb = now; local c = GetClosest(55); if c then Fling(c) end end
-        if F.FlingTarget and F.SelectedTarget and now - jumpDeb > 0.4 then jumpDeb = now; local t = GetTarget(); if t then Fling(t) end end
-        if F.FlingAll and now - jumpDeb > 0.85 then jumpDeb = now; for _, p in ipairs(Players:GetPlayers()) do if p ~= LP then Fling(p) end end end
+        if F.FlingNearest and now - _flingNearestDeb > 0.55 then _flingNearestDeb = now; local c = GetClosest(55); if c then Fling(c) end end
+        if F.FlingTarget and F.SelectedTarget and now - _flingTargetDeb > 0.4 then _flingTargetDeb = now; local t = GetTarget(); if t then Fling(t) end end
+        if F.FlingAll and now - _flingAllDeb > 0.85 then _flingAllDeb = now; for _, p in ipairs(Players:GetPlayers()) do if p ~= LP then Fling(p) end end end
 
         local t = GetTarget()
         if t and t.Character then
@@ -1528,10 +1686,13 @@ RunService.Heartbeat:Connect(function()
                     p.Anchored = true; p.CanCollide = true; p.Material = Enum.Material.Neon
                     p.Color = Color3.fromRGB(0,200,160); p.CFrame = CFrame.new(tr.Position - Vector3.new(0,3,0)); p.Parent = tr
                 end
-            else
-                for _, p in ipairs(Workspace:GetDescendants()) do
-                    if p.Name == "ZPlat" then pcall(function() p:Destroy() end) end
-                end
+            end
+        end
+
+        -- Clean up platform when toggled off (only once, not every frame)
+        if not F.PlatformTarget then
+            for _, p in ipairs(Workspace:GetDescendants()) do
+                if p.Name == "ZPlat" then pcall(function() p:Destroy() end) end
             end
         end
 
@@ -1558,27 +1719,33 @@ end)
 SetLoading(0.70, "Loading UI…")
 
 --============================================================
--- FLUENT
+-- FLUENT-MODDED (with 3 fallback URLs)
 --============================================================
 local Fluent, SaveManager, InterfaceManager
-local function tryLoad(url) local ok, r = pcall(function() return loadstring(game:HttpGet(url, true))() end); return ok and r or nil end
+local function tryLoad(url)
+    local ok, r = pcall(function() return loadstring(game:HttpGet(url, true))() end)
+    return ok and r or nil
+end
 
-Fluent = tryLoad(FLUENT_URL)
-if not Fluent then Fluent = tryLoad("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Source.lua") end
+for _, url in ipairs(FLUENT_URLS) do
+    Fluent = tryLoad(url)
+    if Fluent then break end
+end
 if not Fluent then
     CloseLoading(); pcall(function() LP:Kick("ZuzifyRBX: UI library failed to load.") end); return
 end
 _G.__ZUZY_FLUENT = Fluent
 
-SaveManager = tryLoad("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua")
-InterfaceManager = tryLoad("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua")
+-- Addons from modded repo's Addons folder
+SaveManager = tryLoad("https://raw.githubusercontent.com/StyearX/Fluent-modded/main/Addons/SaveManager.lua")
+InterfaceManager = tryLoad("https://raw.githubusercontent.com/StyearX/Fluent-modded/main/Addons/InterfaceManager.lua")
 
 SetLoading(0.85, "Building UI…")
 
 local Window = Fluent:CreateWindow({
     Title = "ZuzifyRBX "..VERSION,
     SubTitle = "by mrcoptai — "..RoleLabel(MY_ROLE),
-    TabWidth = 170, Size = UDim2.fromOffset(620, 500),
+    TabWidth = 170, Size = UDim2.fromOffset(640, 520),  -- larger window
     Acrylic = true, Theme = "Dark",
     MinimizeKey = Enum.KeyCode.LeftControl,
 })
@@ -1613,7 +1780,7 @@ local Options = Fluent.Options
 SetLoading(0.92, "Populating tabs…")
 
 --============================================================
--- HOME
+-- HOME + ACCOUNT CARD (new)
 --============================================================
 Tabs.Home:AddParagraph({
     Title = "Welcome to ZuzifyRBX",
@@ -1622,6 +1789,228 @@ Tabs.Home:AddParagraph({
               "\nWarnings: "..tostring(userRow.warn_count or 0)..
               "\nPayment Mode: "..EFFECTIVE_PAYMENT_MODE..
               "\nScript Mode: "..EFFECTIVE_SCRIPT_MODE,
+})
+
+-- Account Card
+local function createAccountCard()
+    local cardGui = Instance.new("ScreenGui")
+    cardGui.Name = "ZuzyAccountCard"; cardGui.ResetOnSpawn = false
+    cardGui.IgnoreGuiInset = true; cardGui.DisplayOrder = 995; cardGui.Parent = CoreGui
+
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(0, 320, 0, 360)
+    card.Position = UDim2.new(0.5, -160, 0.5, -180)
+    card.BackgroundColor3 = Color3.fromRGB(14, 14, 20)
+    card.BorderSizePixel = 0
+    card.Visible = false
+    card.Parent = cardGui
+    Instance.new("UICorner", card).CornerRadius = UDim.new(0, 14)
+    local cardStroke = Instance.new("UIStroke"); cardStroke.Color = Color3.fromRGB(0, 220, 180)
+    cardStroke.Thickness = 1.5; cardStroke.Parent = card
+
+    -- Draggable
+    local dragging, dragStart, startPos
+    card.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = card.Position
+        end
+    end)
+    card.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            card.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    card.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    -- Avatar
+    local avatar = Instance.new("ImageLabel")
+    avatar.Size = UDim2.new(0, 80, 0, 80)
+    avatar.Position = UDim2.new(0.5, -40, 0, 16)
+    avatar.BackgroundTransparency = 1
+    avatar.Image = "https://www.roblox.com/headshot-thumbnail/image?userId="..MY_UID.."&width=150&height=150&format=png"
+    avatar.Parent = card
+    Instance.new("UICorner", avatar).CornerRadius = UDim.new(1, 0)
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, -32, 0, 24)
+    nameLabel.Position = UDim2.new(0, 16, 0, 104)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = MY_NAME
+    nameLabel.TextColor3 = Color3.new(1, 1, 1)
+    nameLabel.Font = Enum.Font.GothamBold; nameLabel.TextSize = 18
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Center
+    nameLabel.Parent = card
+
+    local displayLabel = Instance.new("TextLabel")
+    displayLabel.Size = UDim2.new(1, -32, 0, 18)
+    displayLabel.Position = UDim2.new(0, 16, 0, 128)
+    displayLabel.BackgroundTransparency = 1
+    displayLabel.Text = "@" .. LP.DisplayName
+    displayLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
+    displayLabel.Font = Enum.Font.Gotham; displayLabel.TextSize = 13
+    displayLabel.TextXAlignment = Enum.TextXAlignment.Center
+    displayLabel.Parent = card
+
+    local uidLabel = Instance.new("TextLabel")
+    uidLabel.Size = UDim2.new(1, -32, 0, 16)
+    uidLabel.Position = UDim2.new(0, 16, 0, 150)
+    uidLabel.BackgroundTransparency = 1
+    uidLabel.Text = "User ID: " .. MY_UID
+    uidLabel.TextColor3 = Color3.fromRGB(160, 160, 180)
+    uidLabel.Font = Enum.Font.Gotham; uidLabel.TextSize = 12
+    uidLabel.TextXAlignment = Enum.TextXAlignment.Center
+    uidLabel.Parent = card
+
+    local joinLabel = Instance.new("TextLabel")
+    joinLabel.Size = UDim2.new(1, -32, 0, 16)
+    joinLabel.Position = UDim2.new(0, 16, 0, 168)
+    joinLabel.BackgroundTransparency = 1
+    joinLabel.Text = "Joined: " .. (LP.AccountAge and (LP.AccountAge .. " days ago") or "N/A")
+    joinLabel.TextColor3 = Color3.fromRGB(160, 160, 180)
+    joinLabel.Font = Enum.Font.Gotham; joinLabel.TextSize = 12
+    joinLabel.TextXAlignment = Enum.TextXAlignment.Center
+    joinLabel.Parent = card
+
+    -- Badges row (Premium, Role/Tier, Trusted, Staff)
+    local badgeHolder = Instance.new("Frame")
+    badgeHolder.Size = UDim2.new(1, -32, 0, 28)
+    badgeHolder.Position = UDim2.new(0, 16, 0, 192)
+    badgeHolder.BackgroundTransparency = 1
+    badgeHolder.Parent = card
+    local badgeLayout = Instance.new("UIListLayout")
+    badgeLayout.FillDirection = Enum.FillDirection.Horizontal
+    badgeLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    badgeLayout.Padding = UDim.new(0, 6)
+    badgeLayout.Parent = badgeHolder
+
+    local function addBadge(text, color)
+        local b = Instance.new("TextLabel")
+        b.Size = UDim2.new(0, 0, 1, 0)
+        b.AutomaticSize = Enum.AutomaticSize.X
+        b.BackgroundColor3 = color
+        b.Text = " " .. text .. " "
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.Font = Enum.Font.GothamBold; b.TextSize = 11
+        b.Parent = badgeHolder
+        Instance.new("UICorner", b).CornerRadius = UDim.new(1, 0)
+        return b
+    end
+
+    if LP.MembershipType == Enum.MembershipType.Premium then addBadge("Premium", Color3.fromRGB(255, 180, 0)) end
+    addBadge(RoleLabel(MY_ROLE), Color3.fromRGB(0, 160, 130))
+    addBadge(RoleLabel(MY_TIER), Color3.fromRGB(60, 100, 220))
+    if IsTrusted() then addBadge("★ Trusted", Color3.fromRGB(255, 215, 0)) end
+    if IsStaff() then addBadge("🛡 Staff", Color3.fromRGB(180, 60, 60)) end
+
+    -- Live stats
+    local statFrame = Instance.new("Frame")
+    statFrame.Size = UDim2.new(1, -32, 0, 50)
+    statFrame.Position = UDim2.new(0, 16, 0, 232)
+    statFrame.BackgroundTransparency = 1
+    statFrame.Parent = card
+
+    local pingLabel = Instance.new("TextLabel")
+    pingLabel.Size = UDim2.new(0.5, 0, 0, 20)
+    pingLabel.Position = UDim2.new(0, 0, 0, 0)
+    pingLabel.BackgroundTransparency = 1
+    pingLabel.Text = "Ping: …"
+    pingLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+    pingLabel.Font = Enum.Font.Code; pingLabel.TextSize = 12
+    pingLabel.TextXAlignment = Enum.TextXAlignment.Left
+    pingLabel.Parent = statFrame
+
+    local fpsLabel = Instance.new("TextLabel")
+    fpsLabel.Size = UDim2.new(0.5, 0, 0, 20)
+    fpsLabel.Position = UDim2.new(0.5, 0, 0, 0)
+    fpsLabel.BackgroundTransparency = 1
+    fpsLabel.Text = "FPS: …"
+    fpsLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+    fpsLabel.Font = Enum.Font.Code; fpsLabel.TextSize = 12
+    fpsLabel.TextXAlignment = Enum.TextXAlignment.Left
+    fpsLabel.Parent = statFrame
+
+    local placeLabel = Instance.new("TextLabel")
+    placeLabel.Size = UDim2.new(1, 0, 0, 20)
+    placeLabel.Position = UDim2.new(0, 0, 0, 24)
+    placeLabel.BackgroundTransparency = 1
+    placeLabel.Text = "Place: " .. PLACE_ID .. " | Job: " .. JOB_ID:sub(1, 8)
+    placeLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+    placeLabel.Font = Enum.Font.Code; placeLabel.TextSize = 11
+    placeLabel.TextXAlignment = Enum.TextXAlignment.Left
+    placeLabel.Parent = statFrame
+
+    -- Copy buttons
+    local copyHolder = Instance.new("Frame")
+    copyHolder.Size = UDim2.new(1, -32, 0, 30)
+    copyHolder.Position = UDim2.new(0, 16, 0, 288)
+    copyHolder.BackgroundTransparency = 1
+    copyHolder.Parent = card
+    local copyLayout = Instance.new("UIListLayout")
+    copyLayout.FillDirection = Enum.FillDirection.Horizontal
+    copyLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    copyLayout.Padding = UDim.new(0, 8)
+    copyLayout.Parent = copyHolder
+
+    local function addCopyBtn(text, value)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0, 0, 1, 0)
+        btn.AutomaticSize = Enum.AutomaticSize.X
+        btn.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+        btn.Text = text
+        btn.TextColor3 = Color3.fromRGB(200, 200, 220)
+        btn.Font = Enum.Font.GothamBold; btn.TextSize = 11
+        btn.Parent = copyHolder
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+        btn.MouseButton1Click:Connect(function()
+            if setclipboard then setclipboard(tostring(value)) end
+        end)
+    end
+    addCopyBtn("Copy UID", MY_UID)
+    addCopyBtn("Copy Job ID", JOB_ID)
+    addCopyBtn("Copy Profile", "https://www.roblox.com/users/"..MY_UID.."/profile")
+
+    -- Close button
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 28, 0, 28)
+    closeBtn.Position = UDim2.new(1, -36, 0, 8)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(60, 20, 20)
+    closeBtn.Text = "✕"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+    closeBtn.Font = Enum.Font.GothamBold; closeBtn.TextSize = 14
+    closeBtn.Parent = card
+    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+    closeBtn.MouseButton1Click:Connect(function() card.Visible = false end)
+
+    -- Update loop for live stats
+    task.spawn(function()
+        while card.Parent do
+            task.wait(0.5)
+            if card.Visible then
+                local ping = "?"
+                pcall(function() ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue()) end)
+                pingLabel.Text = "Ping: " .. ping .. " ms"
+                local fps = math.floor(1 / RunService.RenderStepped:Wait())
+                fpsLabel.Text = "FPS: " .. fps
+                placeLabel.Text = "Place: " .. PLACE_ID .. " | Job: " .. JOB_ID:sub(1, 8) .. " | Players: " .. #Players:GetPlayers()
+            end
+        end
+    end)
+
+    return card
+end
+
+local accountCard = createAccountCard()
+
+Tabs.Home:AddButton({
+    Title = "👤 Open Account Card",
+    Callback = function() accountCard.Visible = not accountCard.Visible end
 })
 Tabs.Home:AddButton({ Title = "Show Status", Callback = function()
     Fluent:Notify({ Title = "Account Status",
@@ -1632,25 +2021,30 @@ end })
 Tabs.Home:AddButton({ Title = "Copy User ID", Callback = function() if setclipboard then setclipboard(tostring(MY_UID)) end end })
 Tabs.Home:AddButton({ Title = "Copy Job ID", Callback = function() if setclipboard then setclipboard(tostring(JOB_ID)) end end })
 
+-- Inline account info on Home (already shown in paragraph above, but add a few buttons)
+Tabs.Home:AddButton({ Title = "📋 Copy Profile Link", Callback = function()
+    if setclipboard then setclipboard("https://www.roblox.com/users/"..MY_UID.."/profile") end
+end })
+
 --============================================================
--- VISUALS
+-- VISUALS (toggles no longer rebuild; only visibility changes)
 --============================================================
 Tabs.Visuals:AddToggle("ESP", { Title = "Enable ESP", Default = false, Callback = function(v) F.ESP = v; if v then refreshESP() else clearAllESP() end end })
 Tabs.Visuals:AddToggle("ESP_Names", { Title = "Names + Role", Default = true, Callback = function(v) F.ESP_Names = v end })
 Tabs.Visuals:AddToggle("ESP_ShowNotes", { Title = "Show Notes/Tags", Default = true, Callback = function(v) F.ESP_ShowNotes = v end })
 Tabs.Visuals:AddToggle("ESP_Distance", { Title = "Distance", Default = true, Callback = function(v) F.ESP_Distance = v end })
 Tabs.Visuals:AddToggle("ESP_Health", { Title = "Health Text", Default = true, Callback = function(v) F.ESP_Health = v end })
-Tabs.Visuals:AddToggle("ESP_HealthBar", { Title = "Health Bar", Default = true, Callback = function(v) F.ESP_HealthBar = v; refreshESP() end })
-Tabs.Visuals:AddDropdown("ESP_HealthBarStyle", { Title = "Health Bar Style", Values = {"Horizontal","Vertical"}, Default = 1, Callback = function(v) F.ESP_HealthBarStyle = v; refreshESP() end })
+Tabs.Visuals:AddToggle("ESP_HealthBar", { Title = "Health Bar", Default = true, Callback = function(v) F.ESP_HealthBar = v end })
+Tabs.Visuals:AddDropdown("ESP_HealthBarStyle", { Title = "Health Bar Style", Values = {"Horizontal","Vertical"}, Default = 1, Callback = function(v) F.ESP_HealthBarStyle = v end })
 Tabs.Visuals:AddToggle("ESP_Weapon", { Title = "Weapon", Default = true, Callback = function(v) F.ESP_Weapon = v end })
-Tabs.Visuals:AddToggle("ESP_Chams", { Title = "Chams", Default = true, Callback = function(v) F.ESP_Chams = v; refreshESP() end })
-Tabs.Visuals:AddToggle("ESP_Boxes", { Title = "2D Boxes", Default = true, Callback = function(v) F.ESP_Boxes = v; refreshESP() end })
-Tabs.Visuals:AddDropdown("ESP_BoxStyle", { Title = "Box Style", Values = {"Corners","Full"}, Default = 1, Callback = function(v) F.ESP_BoxStyle = v; refreshESP() end })
-Tabs.Visuals:AddToggle("ESP_Tracers", { Title = "Tracers", Default = false, Callback = function(v) F.ESP_Tracers = v; refreshESP() end })
+Tabs.Visuals:AddToggle("ESP_Chams", { Title = "Chams", Default = true, Callback = function(v) F.ESP_Chams = v end })
+Tabs.Visuals:AddToggle("ESP_Boxes", { Title = "2D Boxes", Default = true, Callback = function(v) F.ESP_Boxes = v end })
+Tabs.Visuals:AddDropdown("ESP_BoxStyle", { Title = "Box Style", Values = {"Corners","Full"}, Default = 1, Callback = function(v) F.ESP_BoxStyle = v end })
+Tabs.Visuals:AddToggle("ESP_Tracers", { Title = "Tracers", Default = false, Callback = function(v) F.ESP_Tracers = v end })
 Tabs.Visuals:AddDropdown("TracerMode", { Title = "Tracer Mode", Values = {"Top","Bottom"}, Default = 1, Callback = function(v) F.ESP_TracersMode = v end })
-Tabs.Visuals:AddToggle("ESP_HeadDot", { Title = "Head Dot", Default = false, Callback = function(v) F.ESP_HeadDot = v; refreshESP() end })
-Tabs.Visuals:AddToggle("ESP_Skeleton", { Title = "Skeleton", Default = false, Callback = function(v) F.ESP_Skeleton = v; refreshESP() end })
-Tabs.Visuals:AddToggle("ESP_FacingArrow", { Title = "Facing Arrow", Default = true, Callback = function(v) F.ESP_FacingArrow = v; refreshESP() end })
+Tabs.Visuals:AddToggle("ESP_HeadDot", { Title = "Head Dot", Default = false, Callback = function(v) F.ESP_HeadDot = v end })
+Tabs.Visuals:AddToggle("ESP_Skeleton", { Title = "Skeleton", Default = false, Callback = function(v) F.ESP_Skeleton = v end })
+Tabs.Visuals:AddToggle("ESP_FacingArrow", { Title = "Facing Arrow", Default = true, Callback = function(v) F.ESP_FacingArrow = v end })
 Tabs.Visuals:AddSlider("ESPMaxDist", { Title = "Max Distance", Default = 1500, Min = 100, Max = 5000, Rounding = 100, Callback = function(v) F.ESP_MaxDistance = v end })
 Tabs.Visuals:AddSlider("ESPRefresh", { Title = "Refresh Rate", Default = 0.08, Min = 0.03, Max = 0.5, Rounding = 0.01, Callback = function(v) F.ESP_RefreshRate = v end })
 Tabs.Visuals:AddToggle("ESP_DeadCheck", { Title = "Hide Dead", Default = true, Callback = function(v) F.ESP_DeadCheck = v end })
@@ -1658,14 +2052,14 @@ Tabs.Visuals:AddToggle("ESP_MurdererOnly", { Title = "Only Murderer", Default = 
 Tabs.Visuals:AddToggle("ESP_SheriffOnly", { Title = "Only Sheriff", Default = false, Callback = function(v) F.ESP_ShowOnlySheriff = v end })
 Tabs.Visuals:AddToggle("ESP_Through", { Title = "Through Walls", Default = true, Callback = function(v) F.ESP_Through = v; refreshESP() end })
 Tabs.Visuals:AddToggle("ESP_NameOnly", { Title = "Name Only (Clean)", Default = false, Callback = function(v) F.ESP_NameOnly = v end })
-Tabs.Visuals:AddSlider("ESPTextSize", { Title = "Text Size", Default = 15, Min = 8, Max = 30, Rounding = 1, Callback = function(v) F.ESP_TextSize = v; refreshESP() end })
-Tabs.Visuals:AddSlider("ESPFill", { Title = "Fill Transparency", Default = 0.55, Min = 0, Max = 1, Rounding = 0.05, Callback = function(v) F.ESP_FillTransparency = v; refreshESP() end })
-Tabs.Visuals:AddSlider("ESPOutline", { Title = "Outline Transparency", Default = 0.1, Min = 0, Max = 1, Rounding = 0.05, Callback = function(v) F.ESP_OutlineTransparency = v; refreshESP() end })
+Tabs.Visuals:AddSlider("ESPTextSize", { Title = "Text Size", Default = 15, Min = 8, Max = 30, Rounding = 1, Callback = function(v) F.ESP_TextSize = v end })
+Tabs.Visuals:AddSlider("ESPFill", { Title = "Fill Transparency", Default = 0.55, Min = 0, Max = 1, Rounding = 0.05, Callback = function(v) F.ESP_FillTransparency = v end })
+Tabs.Visuals:AddSlider("ESPOutline", { Title = "Outline Transparency", Default = 0.1, Min = 0, Max = 1, Rounding = 0.05, Callback = function(v) F.ESP_OutlineTransparency = v end })
 Tabs.Visuals:AddToggle("ESP_FOVCircle", { Title = "FOV Circle", Default = false, Callback = function(v) F.ESP_FOVCircle = v; updateFOVCircle() end })
 Tabs.Visuals:AddSlider("FOVRadius", { Title = "FOV Radius", Default = 140, Min = 50, Max = 400, Rounding = 10, Callback = function(v) F.ESP_FOVRadius = v; updateFOVCircle() end })
 
 --============================================================
--- DETECTION (NEW TAB)
+-- DETECTION
 --============================================================
 Tabs.Detection:AddParagraph({
     Title = "🎯 Detection & Threat System",
@@ -1696,7 +2090,7 @@ Tabs.Detection:AddColorpicker("ThreatMidColor", { Title = "Caution Color", Defau
 Tabs.Detection:AddColorpicker("ThreatHighColor", { Title = "Danger Color", Default = Color3.fromRGB(255,60,60), Callback = function(c) F.ESP_ThreatColorHigh = c end })
 
 --============================================================
--- ALERTS (NEW TAB)
+-- ALERTS
 --============================================================
 Tabs.Alerts:AddParagraph({
     Title = "🔔 Threat Alerts",
@@ -1741,12 +2135,16 @@ end
 Tabs.Roster:AddParagraph({ Title = "Live Roster", Content = "All players in this server." })
 local function pNames() local l = {}; for _, p in ipairs(Players:GetPlayers()) do if p ~= LP then table.insert(l, p.Name) end end; return l end
 local playerDropdown
+local initialNames = pNames()
 playerDropdown = Tabs.Roster:AddDropdown("TargetDropdown", {
     Title = "Select Player",
-    Values = (#pNames() > 0) and pNames() or {"None"},
+    Values = (#initialNames > 0) and initialNames or {"None"},
     Default = 1,
     Callback = function(v) F.SelectedTarget = v end,
 })
+-- Set initial target
+if #initialNames > 0 then F.SelectedTarget = initialNames[1] end
+
 Tabs.Roster:AddButton({ Title = "Refresh Roster", Callback = function()
     local list = pNames(); if #list == 0 then list = {"None"} end
     playerDropdown:SetValues(list)
@@ -1987,6 +2385,9 @@ Tabs.Apply:AddInput("AppWhy", { Title = "Why you?", Callback = function(t) appWh
 Tabs.Apply:AddInput("AppHours", { Title = "Hours/week", Callback = function(t) appHours = t end })
 Tabs.Apply:AddInput("AppAge", { Title = "Age", Callback = function(t) appAge = t end })
 Tabs.Apply:AddButton({ Title = "Submit Application", Callback = function()
+    if GlobalSettings.applications_open ~= "true" then
+        Fluent:Notify({ Title = "Applications Closed", Content = "Applications are currently closed.", Duration = 5 }); return
+    end
     if appWhy == "" or appExperience == "" then Fluent:Notify({ Title = "Error", Content = "Fill fields.", Duration = 4 }); return end
     task.spawn(function() pcall(function()
         sbPost("zuzify_applications", { applicant_id=MY_UID, applicant_name=MY_NAME,
@@ -2059,6 +2460,7 @@ if InterfaceManager then pcall(function()
 end) end
 
 Tabs.Settings:AddParagraph({ Title = "About", Content = "ZuzifyRBX "..VERSION.."\nOwner: mrcoptai\nTime: "..os.date("%Y-%m-%d %H:%M:%S") })
+Tabs.Settings:AddButton({ Title = "👤 Open Account Card", Callback = function() accountCard.Visible = not accountCard.Visible end })
 
 Tabs.Settings:AddDropdown("ThemePicker", {
     Title = "🎨 Theme",
@@ -2124,8 +2526,8 @@ Tabs.Debug:AddButton({ Title = "🔄 Re-apply Theme", Callback = function() appl
 if IsTrusted() and Tabs.Trusted then
     Tabs.Trusted:AddParagraph({ Title = "★ Trusted Program", Content = "Exclusive perks." })
     Tabs.Trusted:AddToggle("TrustedRainbowTrail", { Title = "★ Rainbow Trail", Default = false, Callback = function(v) F.TrustedRainbowTrail = v end })
-    Tabs.Trusted:AddToggle("TrustedGoldESP", { Title = "★ Gold ESP", Default = false, Callback = function(v) F.ESP_GoldESP = v; refreshESP() end })
-    Tabs.Trusted:AddColorpicker("TrustedColorPicker", { Title = "★ Gold ESP Color", Default = Color3.fromRGB(255,215,0), Callback = function(c) F.ESP_TrustedColor = c; refreshESP() end })
+    Tabs.Trusted:AddToggle("TrustedGoldESP", { Title = "★ Gold ESP", Default = false, Callback = function(v) F.ESP_GoldESP = v end })
+    Tabs.Trusted:AddColorpicker("TrustedColorPicker", { Title = "★ Gold ESP Color", Default = Color3.fromRGB(255,215,0), Callback = function(c) F.ESP_TrustedColor = c end })
     Tabs.Trusted:AddToggle("TrustedPrivateNotify", { Title = "★ Private Notifications", Default = true, Callback = function(v) F.TrustedPrivateNotify = v end })
     Tabs.Trusted:AddToggle("TrustedAutoSave", { Title = "★ Auto-Save Config (5m)", Default = false, Callback = function(v)
         F.TrustedAutoSave = v
@@ -2319,6 +2721,7 @@ end
 --============================================================
 local function showAnnouncement(ann)
     pcall(function()
+        if not ann or not ann.title then return end  -- nil crash guard
         local gui = Instance.new("ScreenGui"); gui.Name="ZuzyAnn"; gui.ResetOnSpawn=false
         gui.IgnoreGuiInset=true; gui.DisplayOrder=997; gui.Parent=CoreGui
         local fr = Instance.new("Frame"); fr.Size = UDim2.new(0,520,0,280)
@@ -2387,7 +2790,7 @@ pollAnnouncements()
 task.spawn(function() while true do task.wait(30); pcall(pollAnnouncements) end end)
 
 --============================================================
--- AUTO-SAVE / LOAD
+-- AUTO-SAVE / LOAD (BindToClose removed)
 --============================================================
 if F.CloudAutoLoad then
     task.spawn(function()
@@ -2407,7 +2810,6 @@ task.spawn(function()
         if F.CloudAutoSave then pcall(saveConfigToCloud) end
     end
 end)
-pcall(function() game:BindToClose(function() pcall(saveConfigToCloud) end) end)
 
 --============================================================
 -- OWNER PENDING APPS NOTIFY
